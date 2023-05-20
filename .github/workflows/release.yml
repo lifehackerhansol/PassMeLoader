@@ -1,0 +1,39 @@
+name: Build release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: skylyrac/blocksds:slim-latest
+    name: Build with Docker using BlocksDS
+    outputs:
+      commit_tag: ${{ steps.vars.outputs.commit_tag }}
+      commit_hash: ${{ steps.vars.outputs.commit_hash }}
+      author_name: ${{ steps.vars.outputs.author_name }}
+      committer_name: ${{ steps.vars.outputs.committer_name }}
+      commit_subject: ${{ steps.vars.outputs.commit_subject }}
+      commit_message: ${{ steps.vars.outputs.commit_message }}
+      current_date: ${{ steps.vars.outputs.current_date }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Setup environment
+        run: git config --global safe.directory '*'
+      - name: Make application
+        id: build
+        run: |
+          make VERBOSE=1
+      - name: Publish build to GH Actions
+        uses: actions/upload-artifact@v2
+        with:
+          path: PassMeLoader.nds
+          name: PassMeLoader-nightly
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            PassMeLoader.nds
