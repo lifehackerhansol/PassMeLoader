@@ -50,6 +50,8 @@ static void resetMemory2_ARM9(void) {
 	WRAM_CR = 0x03;
 }
 
+void swiSoftReset0(void);
+
 void bootMoonlight(void){
 	printf("resetMemory2_ARM9\n");
 	resetMemory2_ARM9();
@@ -67,7 +69,7 @@ void bootMoonlight(void){
 	// enter PassMe loop
 	*((vu32*)0x02FFFE04) = (u32)0xE59FF018;  // ldr pc, 0x02FFFE24
 	__NDSHeader->arm9executeAddress = (void*)0x02FFFE04;  // Set ARM9 Loop address
-	swiSoftReset();  // Reset
+	swiSoftReset0();  // Reset
 	printf("Failed.\n");
 	while(1);
 }

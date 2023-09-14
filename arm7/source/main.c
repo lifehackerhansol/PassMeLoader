@@ -13,6 +13,8 @@ void VblankHandler(void) {
 
 void SwitchUserMode();
 
+void swiSoftReset0(void);
+
 void resetMoonlight(void) {
 	u32 i;
 	REG_IME = IME_DISABLE;	// Disable interrupts
@@ -37,7 +39,7 @@ void resetMoonlight(void) {
 
 	while(__NDSHeader->arm9executeAddress != (void*)0x02FFFE04 && __NDSHeader->arm9executeAddress != (void*)0x0CFFFE04);
 	__NDSHeader->arm7executeAddress = (void*)0x080000C0;	// Bootloader start address
-	swiSoftReset();
+	swiSoftReset0();
 	while(1);
 }
 
