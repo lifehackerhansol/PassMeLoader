@@ -41,11 +41,7 @@ Helpful information:
 #include <nds/timers.h>
 #include <nds/memory.h>
 #include <nds/arm7/audio.h>
-#include "fat.h"
-#include "dldi_patcher.h"
-#include "card.h"
 #include "boot.h"
-#include "sdmmc.h"
 
 void arm7clearRAM();
 
@@ -56,17 +52,7 @@ void arm7clearRAM();
 #define NDS_HEAD 0x02FFFE00
 #define TEMP_ARM9_START_ADDRESS (*(vu32*)0x02FFFFF4)
 
-
-const char* bootName = "BOOT.NDS";
-
 extern unsigned long _start;
-extern unsigned long storedFileCluster;
-extern unsigned long initDisc;
-extern unsigned long wantToPatchDLDI;
-extern unsigned long argStart;
-extern unsigned long argSize;
-extern unsigned long dsiSD;
-extern unsigned long dsiMode;
 
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 // Firmware stuff
@@ -105,67 +91,6 @@ static inline void copyLoop (u32* dest, const u32* src, u32 size) {
 		*dest++ = *src++;
 	} while (size -= 4);
 }
-
-//#define resetCpu() __asm volatile("\tswi 0x000000\n");
-
-static char boot_nds[] = "fat:/boot.nds";
-static unsigned long argbuf[4];
-/*-------------------------------------------------------------------------
-passArgs_ARM7
-Copies the command line arguments to the end of the ARM9 binary,
-then sets a flag in memory for the loaded NDS to use
---------------------------------------------------------------------------*/
-void passArgs_ARM7 (void) {
-	u32 ARM9_DST = *((u32*)(NDS_HEAD + 0x028));
-	u32 ARM9_LEN = *((u32*)(NDS_HEAD + 0x02C));
-	u32* argSrc;
-	u32* argDst;
-
-	if (!argStart || !argSize) {
-
-		char *arg = boot_nds;
-		argSize = __builtin_strlen(boot_nds);
-
-		if (dsiSD) {
-			arg++;
-			arg[0] = 's';
-			arg[1] = 'd';
-		}
-		__builtin_memcpy(argbuf,arg,argSize+1);
-		argSrc = argbuf;
-	} else {
-		argSrc = (u32*)(argStart + (int)&_start);
-	}
-
-	if ( ARM9_DST == 0 && ARM9_LEN == 0) {
-		ARM9_DST = *((u32*)(NDS_HEAD + 0x038));
-		ARM9_LEN = *((u32*)(NDS_HEAD + 0x03C));
-	}
-
-
-	argDst = (u32*)((ARM9_DST + ARM9_LEN + 3) & ~3);		// Word aligned
-
-	if (dsiMode && (*(u8*)(NDS_HEAD + 0x012) & BIT(1)))
-	{
-		u32 ARM9i_DST = *((u32*)(TWL_HEAD + 0x1C8));
-		u32 ARM9i_LEN = *((u32*)(TWL_HEAD + 0x1CC));
-		if (ARM9i_LEN)
-		{
-			u32* argDst2 = (u32*)((ARM9i_DST + ARM9i_LEN + 3) & ~3);		// Word aligned
-			if (argDst2 > argDst)
-				argDst = argDst2;
-		}
-	}
-
-	copyLoop(argDst, argSrc, argSize);
-
-	__system_argv->argvMagic = ARGV_MAGIC;
-	__system_argv->commandLine = (char*)argDst;
-	__system_argv->length = argSize;
-}
-
-
-
 
 /*-------------------------------------------------------------------------
 resetMemory_ARM7
@@ -242,50 +167,7 @@ void resetMemory_ARM7 (void)
 
 }
 
-
-void loadBinary_ARM7 (u32 fileCluster)
-{
-	u32 ndsHeader[0x170>>2];
-
-	// read NDS header
-	fileRead ((char*)ndsHeader, fileCluster, 0, 0x170);
-	// read ARM9 info from NDS header
-	u32 ARM9_SRC = ndsHeader[0x020>>2];
-	char* ARM9_DST = (char*)ndsHeader[0x028>>2];
-	u32 ARM9_LEN = ndsHeader[0x02C>>2];
-	// read ARM7 info from NDS header
-	u32 ARM7_SRC = ndsHeader[0x030>>2];
-	char* ARM7_DST = (char*)ndsHeader[0x038>>2];
-	u32 ARM7_LEN = ndsHeader[0x03C>>2];
-
-	// Load binaries into memory
-	fileRead(ARM9_DST, fileCluster, ARM9_SRC, ARM9_LEN);
-	fileRead(ARM7_DST, fileCluster, ARM7_SRC, ARM7_LEN);
-
-	// first copy the header to its proper location, excluding
-	// the ARM9 start address, so as not to start it
-	TEMP_ARM9_START_ADDRESS = ndsHeader[0x024>>2];		// Store for later
-	ndsHeader[0x024>>2] = 0;
-	dmaCopyWords(3, (void*)ndsHeader, (void*)NDS_HEAD, 0x170);
-
-	if (dsiMode && (ndsHeader[0x10>>2]&BIT(16+1)))
-	{
-		// Read full TWL header
-		fileRead((char*)TWL_HEAD, fileCluster, 0, 0x1000);
-
-		u32 ARM9i_SRC = *(u32*)(TWL_HEAD+0x1C0);
-		char* ARM9i_DST = (char*)*(u32*)(TWL_HEAD+0x1C8);
-		u32 ARM9i_LEN = *(u32*)(TWL_HEAD+0x1CC);
-		u32 ARM7i_SRC = *(u32*)(TWL_HEAD+0x1D0);
-		char* ARM7i_DST = (char*)*(u32*)(TWL_HEAD+0x1D8);
-		u32 ARM7i_LEN = *(u32*)(TWL_HEAD+0x1DC);
-
-		if (ARM9i_LEN)
-			fileRead(ARM9i_DST, fileCluster, ARM9i_SRC, ARM9i_LEN);
-		if (ARM7i_LEN)
-			fileRead(ARM7i_DST, fileCluster, ARM7i_SRC, ARM7i_LEN);
-	}
-}
+void swiSoftReset0(void);
 
 /*-------------------------------------------------------------------------
 startBinary_ARM7
@@ -298,60 +180,16 @@ void startBinary_ARM7 (void) {
 	REG_IME=0;
 	while(REG_VCOUNT!=191);
 	while(REG_VCOUNT==191);
-	// copy NDS ARM9 start address into the header, starting ARM9
-	*((vu32*)0x02FFFE24) = TEMP_ARM9_START_ADDRESS;
-	ARM9_START_FLAG = 1;
-	// Start ARM7
-	VoidFn arm7code = *(VoidFn*)(0x2FFFE34);
-	arm7code();
-}
-#ifndef NO_SDMMC
-int sdmmc_sd_readsectors(u32 sector_no, u32 numsectors, void *out);
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-// Main function
-bool sdmmc_inserted() {
-	return true;
+	// Set to GBA cartridge slot
+	*((vu32*)0x02FFFE34) = 0x08000000;
+	// Reset ARM7
+	swiSoftReset0();
 }
 
-bool sdmmc_startup() {
-	sdmmc_controller_init(true);
-	return sdmmc_sdcard_init() == 0;
-}
-
-bool sdmmc_readsectors(u32 sector_no, u32 numsectors, void *out) {
-	return sdmmc_sdcard_readsectors(sector_no, numsectors, out) == 0;
-}
-#endif
 void mpu_reset();
 void mpu_reset_end();
 
 int main (void) {
-#ifdef NO_DLDI
-	dsiSD = true;
-	dsiMode = true;
-#endif
-#ifndef NO_SDMMC
-	if (dsiSD && dsiMode) {
-		_io_dldi.fn_readSectors = sdmmc_readsectors;
-		_io_dldi.fn_isInserted = sdmmc_inserted;
-		_io_dldi.fn_startup = sdmmc_startup;
-	}
-#endif
-	u32 fileCluster = storedFileCluster;
-	// Init card
-	if(!FAT_InitFiles(initDisc))
-	{
-		return -1;
-	}
-	if ((fileCluster < CLUSTER_FIRST) || (fileCluster >= CLUSTER_EOF)) 	/* Invalid file cluster specified */
-	{
-		fileCluster = getBootFileCluster(bootName);
-	}
-	if (fileCluster == CLUSTER_FREE)
-	{
-		return -1;
-	}
-
 	// ARM9 clears its memory part 2
 	// copy ARM9 function to RAM, and make the ARM9 jump to it
 	copyLoop((void*)TEMP_MEM, (void*)resetMemory2_ARM9, resetMemory2_ARM9_size);
@@ -373,27 +211,6 @@ int main (void) {
 	// copy ARM9 function to RAM, and make the ARM9 jump to it
 	copyLoop((void*)TEMP_MEM, (void*)startBinary_ARM9, startBinary_ARM9_size);
 	(*(vu32*)0x02FFFE24) = (u32)TEMP_MEM;	// Make ARM9 jump to the function
-
-	// Load the NDS file
-	loadBinary_ARM7(fileCluster);
-
-#ifndef NO_DLDI
-	// Patch with DLDI if desired
-	if (wantToPatchDLDI) {
-		dldiPatchBinary ((u8*)((u32*)NDS_HEAD)[0x0A], ((u32*)NDS_HEAD)[0x0B]);
-	}
-#endif
-
-#ifndef NO_SDMMC
-	if (dsiSD && dsiMode) {
-		sdmmc_controller_init(true);
-		*(vu16*)(SDMMC_BASE + REG_SDDATACTL32) &= 0xFFFDu;
-		*(vu16*)(SDMMC_BASE + REG_SDDATACTL) &= 0xFFDDu;
-		*(vu16*)(SDMMC_BASE + REG_SDBLKLEN32) = 0;
-	}
-#endif
-	// Pass command line arguments to loaded program
-	passArgs_ARM7();
 
 	startBinary_ARM7();
 
