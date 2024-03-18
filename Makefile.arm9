@@ -11,7 +11,7 @@ BLOCKSDSEXT	?= /opt/blocksds/external
 SOURCEDIRS	:= arm9/source
 INCLUDEDIRS	:=
 GFXDIRS		:=
-BINDIRS		:=
+BINDIRS		:= data
 AUDIODIRS	:=
 
 # Defines passed to all files
