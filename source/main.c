@@ -32,8 +32,7 @@ int main(void) {
 	__NDSHeader->arm9executeAddress = (void*)0x02FFFE04;  // Set ARM9 Loop address
 
 	// ARM7, here we come for the bootloader!
-	__NDSHeader->arm7executeAddress = (void*)0x06000000;  // bootloader address from ARM7's eyes
-	fifoSendValue32(FIFO_USER_01, 1);
+	resetARM7(0x06000000);
 
 	// Reset
 	swiSoftReset0();
